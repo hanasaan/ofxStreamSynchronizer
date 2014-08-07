@@ -114,6 +114,7 @@ public:
         int bufferSize = 2 + (delayMillis / expectedMessageIntervalMillis);
         delayBuffer.setup(bufferSize, T());
     }
+    uint64_t getDelayMillis() {return delayMillis;}
     
     const T& get() const {
         if (delayMillis == 0) {
