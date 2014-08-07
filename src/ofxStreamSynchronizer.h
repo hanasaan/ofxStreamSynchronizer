@@ -125,6 +125,28 @@ public:
 };
 
 //-------------------------------------------------------------------------------------
+template <typename T>
+class PassThroughReceiverImpl : public ReceiverImpl<T>
+{
+protected:
+    T data;
+    
+    // recording related functions.
+    virtual void createRecordBuffer() {
+        Receiver::recordBuffer.clear();
+        Receiver::recordBuffer.append(reinterpret_cast<char*>(&data), sizeof(T));
+    }
+    
+    // playback related functions.
+    virtual void updateFromBuffer(uint64_t ts, const ofBuffer& buffer) {
+        buffer.getBinaryBuffer();
+        const T* d = reinterpret_cast<const T*>(buffer.getBinaryBuffer());
+        data = *d;
+        ReceiverImpl<T>::delayBuffer.enqueue(data, ts);
+    }
+};
+
+//-------------------------------------------------------------------------------------
 class Service : public ofThread
 {
     struct RecordHeader {
