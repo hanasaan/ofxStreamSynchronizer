@@ -12,58 +12,6 @@
 
 STREAM_SYNCHRONIZER_BEGIN_NAMESPACE
 
-template <typename T>
-class DelayBuffer
-{
-    vector<T> buffer;
-    vector<uint64_t> timestamp;
-    int counter;
-    
-public:
-    void setup(int sz, const T& val) {
-        buffer.assign(sz, val);
-        timestamp.assign(sz, 0);
-        counter = 0;
-    }
-    
-    void resize(int newsz) {
-        buffer.resize(newsz);
-        timestamp.assign(newsz, 0);
-    }
-    
-    void enqueue(const T& queue, uint64_t ts) {
-        buffer.at(counter % buffer.size()) = queue;
-        timestamp.at(counter % timestamp.size()) = ts;
-        counter++;
-    }
-    
-    const T& getDelayed() const {
-        return buffer.at((counter) % buffer.size());
-    }
-
-    const T& getNow() const {
-        return buffer.at((counter - 1) % buffer.size());
-    }
-
-    const T& get(uint64_t ts) const {
-        int c = counter;
-        
-        // delayed to now
-        for (int i=c; i<c+buffer.size(); ++i) {
-            if (timestamp.at(i % timestamp.size()) > ts) {
-                if (i == c) {
-                    return buffer.at((i) % buffer.size());
-                } else {
-                    return buffer.at((i - 1) % buffer.size());
-                }
-            }
-        }
-        return getDelayed();
-    }
-
-};
-
-
 //-------------------------------------------------------------------------------------
 class Service;
 
@@ -99,15 +47,66 @@ protected:
     virtual int getTypeId() = 0;
 };
 
+//-------------------------------------------------------------------------------------
 template <typename T>
 class ReceiverImpl : public Receiver
 {
+    class DelayBuffer
+    {
+        vector<T> buffer;
+        vector<uint64_t> timestamp;
+        int counter;
+        
+    public:
+        void setup(int sz, const T& val) {
+            buffer.assign(sz, val);
+            timestamp.assign(sz, 0);
+            counter = 0;
+        }
+        
+        void resize(int newsz) {
+            buffer.resize(newsz);
+            timestamp.assign(newsz, 0);
+        }
+        
+        void enqueue(const T& queue, uint64_t ts) {
+            buffer.at(counter % buffer.size()) = queue;
+            timestamp.at(counter % timestamp.size()) = ts;
+            counter++;
+        }
+        
+        const T& getDelayed() const {
+            return buffer.at((counter) % buffer.size());
+        }
+        
+        const T& getNow() const {
+            return buffer.at((counter - 1) % buffer.size());
+        }
+        
+        const T& get(uint64_t ts) const {
+            int c = counter;
+            
+            // delayed to now
+            for (int i=c; i<c+buffer.size(); ++i) {
+                if (timestamp.at(i % timestamp.size()) > ts) {
+                    if (i == c) {
+                        return buffer.at((i) % buffer.size());
+                    } else {
+                        return buffer.at((i - 1) % buffer.size());
+                    }
+                }
+            }
+            return getDelayed();
+        }
+        
+    };
+
 protected:
     ReceiverImpl() : delayMillis(0) {}
     virtual ~ReceiverImpl() {}
     
     uint64_t delayMillis;
-    DelayBuffer<T> delayBuffer;
+    DelayBuffer delayBuffer;
     
 public:
     void setDelayMillis(uint64_t delay, uint64_t expectedMessageIntervalMillis) {
