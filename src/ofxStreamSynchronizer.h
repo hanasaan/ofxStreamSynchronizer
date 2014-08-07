@@ -187,6 +187,7 @@ class Service : public ofThread
     vector<Receiver*> receivers;
     bool bRecording;
     bool bPlayback;
+    bool bPlaybackPause;
     ofFile fileRecord;
     
     // playback related
@@ -194,11 +195,14 @@ class Service : public ofThread
     uint64_t playbackStartTs;
     uint64_t recordedStartTs;
     RecordHeader currentHeader;
+    uint64_t playbackTs;
 
 public:
     Service() {
         bRecording = false;
         bPlayback = false;
+        bPlaybackPause = false;
+        playbackTs = 0;
     }
 
     ~Service() {
@@ -206,6 +210,7 @@ public:
     
     bool isRecording() {return bRecording;}
     bool isPlayback() {return bPlayback;}
+    bool isPlaybackPause() {return bPlaybackPause;}
     
     void stop() {
         lock();
@@ -278,13 +283,34 @@ public:
         bRecording = false;
     }
     
+    void pausePlayback() {
+        if (!bPlayback) {
+            return;
+        }
+        bPlaybackPause = true;
+    }
+    
+    void resumePlayback() {
+        if (!bPlayback) {
+            return;
+        }
+        playbackStartTs = ofGetElapsedTimeMillis() - playbackTs + recordedStartTs;
+        bPlaybackPause = false;
+    }
+    
+    void proceedTimestampPlayback(uint64_t incrementTimeMillis) {
+        playbackTs += incrementTimeMillis;
+    }
+    
 protected:
     void threadedFunction() {
         while(isThreadRunning()) {
             uint64_t ts = ofGetElapsedTimeMillis();
             lock();
             if (bPlayback) {
-                uint64_t playbackTs = ts - playbackStartTs + recordedStartTs;
+                if (!bPlaybackPause) {
+                    playbackTs = ts - playbackStartTs + recordedStartTs;
+                }
                 while (playbackTs >= currentHeader.timestamp) {
                     ofBuffer buff;
                     buff.allocate(currentHeader.bodyLength);
