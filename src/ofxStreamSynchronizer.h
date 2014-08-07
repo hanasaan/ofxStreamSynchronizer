@@ -56,12 +56,29 @@ class ReceiverImpl : public Receiver
         vector<T> buffer;
         vector<uint64_t> timestamp;
         int counter;
+        uint64_t lastConsumedTimestamp;
+        bool consumeNewData;
+        
+        void updateConsumeData(uint64_t consumeTimestamp) {
+            if (consumeTimestamp > lastConsumedTimestamp) {
+                lastConsumedTimestamp = consumeTimestamp;
+                consumeNewData = true;
+            } else {
+                consumeNewData = false;
+            }
+        }
         
     public:
+        bool isConsumeNewData() const {
+            return consumeNewData;
+        }
+
         void setup(int sz, const T& val) {
             buffer.assign(sz, val);
             timestamp.assign(sz, 0);
             counter = 0;
+            lastConsumedTimestamp = 0;
+            consumeNewData = false;
         }
         
         void resize(int newsz) {
@@ -75,23 +92,27 @@ class ReceiverImpl : public Receiver
             counter++;
         }
         
-        const T& getDelayed() const {
+        const T& getDelayed() {
+            updateConsumeData(timestamp.at(counter % timestamp.size()));
             return buffer.at((counter) % buffer.size());
         }
         
-        const T& getNow() const {
+        const T& getNow() {
+            updateConsumeData(timestamp.at((counter - 1) % timestamp.size()));
             return buffer.at((counter - 1) % buffer.size());
         }
         
-        const T& get(uint64_t ts) const {
+        const T& get(uint64_t ts) {
             int c = counter;
             
             // delayed to now
             for (int i=c; i<c+buffer.size(); ++i) {
                 if (timestamp.at(i % timestamp.size()) > ts) {
                     if (i == c) {
+                        updateConsumeData(timestamp.at((i) % timestamp.size()));
                         return buffer.at((i) % buffer.size());
                     } else {
+                        updateConsumeData(timestamp.at((i - 1) % timestamp.size()));
                         return buffer.at((i - 1) % buffer.size());
                     }
                 }
@@ -116,11 +137,16 @@ public:
     }
     uint64_t getDelayMillis() {return delayMillis;}
     
-    const T& get() const {
+    const T& get() {
         if (delayMillis == 0) {
             return delayBuffer.getNow();
         }
         return delayBuffer.get(getTs() - delayMillis);
+    }
+    
+    bool needProcessing() {
+        get();
+        return delayBuffer.isConsumeNewData();
     }
 };
 
