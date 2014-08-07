@@ -133,8 +133,7 @@ protected:
     
     // recording related functions.
     virtual void createRecordBuffer() {
-        Receiver::recordBuffer.clear();
-        Receiver::recordBuffer.append(reinterpret_cast<char*>(&data), sizeof(T));
+        Receiver::recordBuffer.set(reinterpret_cast<char*>(&data), sizeof(T));
     }
     
     // playback related functions.
