@@ -20,18 +20,18 @@ class Receiver
     friend class Service;
     
 private:
-    uint64_t ts; // handled by Service
+    uint64_t tsForDelayBufferGet; // handled by Service
 
 protected:
     ofBuffer recordBuffer;
-    inline uint64_t getTs() const {return ts;}
+    inline uint64_t getTsForDelayBufferGet() const {return tsForDelayBufferGet;}
 
 public:
     virtual void setupForLiveSource() {}
     virtual void setupForFile() {}
 
 protected:
-    Receiver() : ts(0) {}
+    Receiver() : tsForDelayBufferGet(0) {}
     virtual ~Receiver() {}
     
     // return true if new frame arrived.
@@ -141,7 +141,7 @@ public:
         if (delayMillis == 0) {
             return delayBuffer.getNow();
         }
-        return delayBuffer.get(getTs() - delayMillis);
+        return delayBuffer.get(getTsForDelayBufferGet() - delayMillis);
     }
     
     bool needProcessing() {
@@ -184,7 +184,61 @@ class Service : public ofThread
         : typeId(tid), bodyLength(length), timestamp(ts) {}
     };
     
-    vector<Receiver*> receivers;
+    class ReceiverThread : public ofThread
+    {
+        friend class Service;
+    private:
+        Receiver* receiver;
+        Service* parent;
+        
+        struct PlaybackBuffer {
+            uint64_t ts;
+            ofBuffer buffer;
+            
+            PlaybackBuffer() {}
+            PlaybackBuffer(uint64_t t, const ofBuffer& b) : buffer(b), ts(t) {}
+        };
+        
+        deque<PlaybackBuffer> playbackBuffer;
+        
+    public:
+        ReceiverThread()  : receiver(NULL), parent(NULL) {}
+        ReceiverThread(Receiver* r, Service* s) : receiver(r), parent(s) {}
+        
+        void enqueuePlaybackBuffer(uint64_t ts, const ofBuffer& buff) {
+            lock();
+            playbackBuffer.push_back(PlaybackBuffer(ts, buff));
+            unlock();
+        }
+        
+        void setTsForDelayBufferGet(uint64_t ts) {
+            receiver->tsForDelayBufferGet = ts;
+        }
+        
+    protected:
+        void threadedFunction() {
+            while(isThreadRunning()) {
+                lock();
+                if (parent->bPlayback) {
+                    while (playbackBuffer.size()) {
+                        receiver->updateFromBuffer(playbackBuffer.front().ts, playbackBuffer.front().buffer);
+                        playbackBuffer.pop_front();
+                    }
+                } else {
+                    uint64_t ts = ofGetElapsedTimeMillis();
+                    bool newMessage = receiver->update(ts);
+                    if (newMessage && parent->bRecording) {
+                        parent->record(ts, receiver);
+                    }
+                }
+                unlock();
+                sleep(1);
+            }
+        }
+    };
+    friend class ReceiverThread;
+    
+    vector<ReceiverThread*> receiverThreads;
     bool bRecording;
     bool bPlayback;
     bool bPlaybackPause;
@@ -206,6 +260,7 @@ public:
     }
 
     ~Service() {
+        stop();
     }
     
     bool isRecording() {return bRecording;}
@@ -214,28 +269,35 @@ public:
     
     void stop() {
         lock();
-        receivers.clear();
+        for (ReceiverThread* rt : receiverThreads) {
+            rt->waitForThread(true);
+            delete rt;
+        }
+        receiverThreads.clear();
         unlock();
         waitForThread(true);
     }
     
     // this method should be called before setup
     void registerReceiver(Receiver* receiver) {
-        receivers.push_back(receiver);
+        receiverThreads.push_back(new ReceiverThread(receiver, this));
     }
     
     // for live source
     void setup() {
-        for (Receiver* r : receivers) {
-            r->setupForLiveSource();
+        for (ReceiverThread* rt : receiverThreads) {
+            rt->receiver->setupForLiveSource();
         }
         startThread();
+        for (ReceiverThread* rt : receiverThreads) {
+            rt->startThread();
+        }
     }
     
     // for playback
     void setup(string path) {
-        for (Receiver* r : receivers) {
-            r->setupForFile();
+        for (ReceiverThread* rt : receiverThreads) {
+            rt->receiver->setupForFile();
         }
         
         filePlayback.open(path, ofFile::ReadOnly, true);
@@ -247,6 +309,9 @@ public:
         
         bPlayback = true;
         startThread();
+        for (ReceiverThread* rt : receiverThreads) {
+            rt->startThread();
+        }
     }
     
     void startRecording(string path) {
@@ -302,8 +367,29 @@ public:
         playbackTs += incrementTimeMillis;
     }
     
+    void lockAll() {
+        ofThread::lock();
+        for (ReceiverThread* rt : receiverThreads) {
+            rt->lock();
+        }
+    }
+    
+    void unlockAll() {
+        for (ReceiverThread* rt : receiverThreads) {
+            rt->unlock();
+        }
+        ofThread::unlock();
+    }
+
 protected:
+    void lock() {}
+    void unlock() {}
+    
     void threadedFunction() {
+        if (!bPlayback) {
+            return;
+        }
+        
         while(isThreadRunning()) {
             uint64_t ts = ofGetElapsedTimeMillis();
             lock();
@@ -315,14 +401,15 @@ protected:
                     ofBuffer buff;
                     buff.allocate(currentHeader.bodyLength);
                     filePlayback.read(buff.getBinaryBuffer(), currentHeader.bodyLength);
-                    for (Receiver* r : receivers) {
-                        r->ts = playbackTs;
-                        if (r->getTypeId() == currentHeader.typeId) {
-                            r->updateFromBuffer(playbackTs, buff);
+                    
+                    for (ReceiverThread* rt : receiverThreads) {
+                        rt->setTsForDelayBufferGet(playbackTs);
+                        if (rt->receiver->getTypeId() == currentHeader.typeId) {
+                            rt->enqueuePlaybackBuffer(playbackTs, buff);
                             break;
                         }
                     }
-                    
+
                     if (filePlayback.eof()) {
                         unlock();
                         return;
@@ -330,31 +417,26 @@ protected:
                     
                     filePlayback.read(reinterpret_cast<char*>(&currentHeader), sizeof(currentHeader));
                 }
-            } else {
-                for (Receiver* r : receivers) {
-                    r->ts = ts;
-                    bool newMessage = r->update(ts);
-                    if (newMessage && bRecording) {
-                        recordFileLock.lock();
-                        
-                        // create body
-                        r->createRecordBuffer();
-                        
-                        // write header
-                        RecordHeader header(r->getTypeId(), r->recordBuffer.size(), ts);
-                        ofBuffer tsBuffer;
-                        tsBuffer.append(reinterpret_cast<char*>(&header), sizeof(RecordHeader));
-                        tsBuffer.writeTo(fileRecord);
-                        
-                        // write body
-                        r->recordBuffer.writeTo(fileRecord);
-                        recordFileLock.unlock();
-                    }
-                }
             }
             unlock();
             sleep(1);
         }
+    }
+    
+    void record(uint64_t ts, Receiver* r) {
+        // create body
+        r->createRecordBuffer();
+        
+        recordFileLock.lock();
+        // write header
+        RecordHeader header(r->getTypeId(), r->recordBuffer.size(), ts);
+        ofBuffer tsBuffer;
+        tsBuffer.append(reinterpret_cast<char*>(&header), sizeof(RecordHeader));
+        tsBuffer.writeTo(fileRecord);
+        
+        // write body
+        r->recordBuffer.writeTo(fileRecord);
+        recordFileLock.unlock();
     }
     
     Poco::FastMutex recordFileLock;
