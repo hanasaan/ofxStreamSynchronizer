@@ -367,6 +367,10 @@ public:
         playbackTs += incrementTimeMillis;
     }
     
+    uint64_t getPlaybackTime() const {
+        return playbackTs;
+    }
+    
     void lockAll() {
         ofThread::lock();
         for (ReceiverThread* rt : receiverThreads) {
