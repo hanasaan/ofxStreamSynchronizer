@@ -303,7 +303,8 @@ public:
         filePlayback.open(path, ofFile::ReadOnly, true);
         filePlayback.read(reinterpret_cast<char*>(&recordedStartTs), sizeof(uint64_t));
         playbackStartTs = ofGetElapsedTimeMillis();
-        
+        playbackTs = recordedStartTs;
+
         // read first frame header
         filePlayback.read(reinterpret_cast<char*>(&currentHeader), sizeof(currentHeader));
         
