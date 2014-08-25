@@ -408,9 +408,9 @@ protected:
                     filePlayback.read(buff.getBinaryBuffer(), currentHeader.bodyLength);
                     
                     for (ReceiverThread* rt : receiverThreads) {
-                        rt->setTsForDelayBufferGet(playbackTs);
+                        rt->setTsForDelayBufferGet(currentHeader.timestamp);
                         if (rt->receiver->getTypeId() == currentHeader.typeId) {
-                            rt->enqueuePlaybackBuffer(playbackTs, buff);
+                            rt->enqueuePlaybackBuffer(currentHeader.timestamp, buff);
                             break;
                         }
                     }
