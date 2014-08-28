@@ -30,7 +30,6 @@ public:
     virtual void setupForLiveSource() {}
     virtual void setupForFile() {}
 
-protected:
     Receiver() : tsForDelayBufferGet(0) {}
     virtual ~Receiver() {}
     
@@ -174,6 +173,7 @@ protected:
 //-------------------------------------------------------------------------------------
 class Service : public ofThread
 {
+protected:
     struct RecordHeader {
         int typeId;
         int bodyLength;
@@ -187,7 +187,7 @@ class Service : public ofThread
     class ReceiverThread : public ofThread
     {
         friend class Service;
-    private:
+    public:
         Receiver* receiver;
         Service* parent;
         
