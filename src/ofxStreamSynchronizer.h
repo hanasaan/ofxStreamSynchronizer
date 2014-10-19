@@ -404,7 +404,7 @@ protected:
                 }
                 while (playbackTs >= currentHeader.timestamp) {
                     ofBuffer buff;
-                    buff.allocate(currentHeader.bodyLength);
+                    buff.allocate(currentHeader.bodyLength + 1);
                     filePlayback.read(buff.getBinaryBuffer(), currentHeader.bodyLength);
                     
                     for (ReceiverThread* rt : receiverThreads) {
