@@ -122,7 +122,9 @@ class ReceiverImpl : public Receiver
     };
 
 protected:
-    ReceiverImpl() : delayMillis(0) {}
+    ReceiverImpl() : delayMillis(0) {
+        setDelayMillis(0, 1);
+    }
     virtual ~ReceiverImpl() {}
     
     uint64_t delayMillis;
