@@ -244,6 +244,7 @@ protected:
     bool bRecording;
     bool bPlayback;
     bool bPlaybackPause;
+    bool bPlaybackCompleted;
     ofFile fileRecord;
     
     // playback related
@@ -258,6 +259,7 @@ public:
         bRecording = false;
         bPlayback = false;
         bPlaybackPause = false;
+        bPlaybackCompleted = false;
         playbackTs = 0;
     }
 
@@ -374,6 +376,10 @@ public:
         return playbackTs;
     }
     
+    bool isPlaybackCompleted() const {
+        return bPlaybackCompleted;
+    }
+    
     void lockAll() {
         ofThread::lock();
         for (ReceiverThread* rt : receiverThreads) {
@@ -418,6 +424,7 @@ protected:
                     }
 
                     if (filePlayback.eof()) {
+                        bPlaybackCompleted = true;
                         unlock();
                         return;
                     }
